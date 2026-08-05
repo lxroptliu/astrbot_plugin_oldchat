@@ -1,0 +1,8 @@
+name: oldchat_adapter
+desc: OldChat 平台适配器，将 OldChat 服务器接入 AstrBot
+version: 1.0.0
+author: crbot-contrib
+repo: https://github.com/crbot-contrib/astrbot_plugin_oldchat
+display_name: OldChat Adapter
+support_platforms:
+  - oldchat
