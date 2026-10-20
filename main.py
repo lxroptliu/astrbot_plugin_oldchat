@@ -10,9 +10,9 @@ from astrbot.api.star import Context, Star, register
 
 @register(
     "oldchat_adapter",
-    "crbot-contrib",
-    "OldChat 平台适配器，将 OldChat 服务器接入 AstrBot",
-    "1.0.0",
+    "软斯珂Ruansik",
+    "OldChat 平台适配器，将 OldChat 服务器接入 AstrBot（支持 v1/v2 协议切换）",
+    "2.0.0",
     "https://github.com/crbot-contrib/astrbot_plugin_oldchat",
 )
 class OldChatAdapterPlugin(Star):
@@ -20,5 +20,4 @@ class OldChatAdapterPlugin(Star):
 
     def __init__(self, context: Context) -> None:
         super().__init__(context)
-        # 导入子包，触发 @register_platform_adapter 装饰器
         from .oldchat.adapter import OldChatAdapter  # noqa: F401
