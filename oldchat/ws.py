@@ -21,18 +21,20 @@ from ._redact import redact, safe_url
 from .crypto import ECDHSession
 
 
-# 协议 profile：v1 / v2 的握手路径、URL 参数、帧类型集合
+# 协议 profile：v1 / v2 的握手路径、URL 参数、认证方式、帧类型集合
 _WS_PROFILES: dict[str, dict] = {
     "v1": {
         "handshake_path": "/v1/auth/handshake",
-        "url_params": ("sid",),
+        "url_params": ("sid",),                 # ?sid={session_id}
+        "auth_header": True,                    # + Authorization: Bearer {token}
         "message_types": ("group_message", "direct_message"),
         "supports_pts": False,
     },
     "v2": {
         # 阶段 0 抓帧确认；先按文档给默认值
         "handshake_path": "/auth/handshake",
-        "url_params": ("token", "session"),
+        "url_params": ("token", "session"),     # ?token=xxx&session=yyy
+        "auth_header": False,                   # token 走 query，无需 header
         "message_types": ("group_message", "direct_message", "new_message"),
         "supports_pts": True,
     },
@@ -81,7 +83,7 @@ class OldChatWS:
             except Exception:
                 pass
 
-    # ---------------- 握手 / URL ---------------- #
+    # ---------------- 握手 / URL / Header ---------------- #
 
     async def _ensure_session(self) -> bool:
         self._session = ECDHSession(self.base_url)
@@ -102,6 +104,12 @@ class OldChatWS:
             elif name == "device_id":
                 params.append(f"device_id={self.device_id}")
         return f"{scheme}://{p.netloc}/v1/ws?" + "&".join(params)
+
+    def _build_headers(self) -> Optional[dict]:
+        """按 profile 决定是否附加 Authorization 头。"""
+        if self.profile.get("auth_header"):
+            return {"Authorization": f"Bearer {self.access_token}"}
+        return None
 
     # ---------------- 心跳 ---------------- #
 
@@ -141,22 +149,27 @@ class OldChatWS:
                     raise Exception("握手失败")
 
                 url = self._build_url()
+                headers = self._build_headers()
                 logger.info(
-                    "[OldChat/%s] 连接 WS: %s（心跳 %ds）",
+                    "[OldChat/%s] 连接 WS: %s（心跳 %ds，认证方式: %s）",
                     self.version,
                     safe_url(url),
                     self.ping_interval,
+                    "header" if headers else "query",
                 )
-                async with websockets.connect(
-                    url,
-                    ping_interval=None,
-                    max_size=2 ** 22,
-                ) as ws:
+
+                connect_kwargs: dict = {
+                    "ping_interval": None,
+                    "max_size": 2 ** 22,
+                }
+                if headers:
+                    connect_kwargs["additional_headers"] = headers
+
+                async with websockets.connect(url, **connect_kwargs) as ws:
                     self._ws = ws
                     self._backoff = 1.0
                     hb = asyncio.create_task(self._heartbeat(ws))
                     try:
-                        # 重连增量同步
                         if (
                             not self._first_connect
                             and self.profile["supports_pts"]
@@ -194,9 +207,12 @@ class OldChatWS:
                     logger.warning(
                         "[OldChat/%s] WS 认证失败，重登", self.version
                     )
-                    await asyncio.sleep(5)
+                    # 401 通常是 token 失效；重登后短暂等待再重连，不累积 backoff
+                    await asyncio.sleep(1)
                     try:
                         await self._on_unauthorized()
+                        # 重登成功后重置退避，避免下次正常断线时被指数惩罚
+                        self._backoff = 1.0
                     except Exception as le:
                         logger.error(
                             "[OldChat/%s] 重登失败: %s",
@@ -216,7 +232,6 @@ class OldChatWS:
     # ---------------- 帧处理 ---------------- #
 
     async def _handle_raw(self, raw) -> None:
-        # 先尝试明文解析（用于 v2 明文 pong）
         if isinstance(raw, str):
             try:
                 quick = json.loads(raw)
