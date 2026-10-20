@@ -1,4 +1,4 @@
-httpx
-websockets
-cryptography
-aiohttp
+httpx>=0.24
+websockets>=13
+aiohttp>=3.9
+cryptography>=41
